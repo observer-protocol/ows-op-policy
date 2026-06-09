@@ -96,3 +96,33 @@ export function makeStatusList({ issuer, privateKey, verificationMethod, setBits
   };
   return signEddsaJcs2022(cred, privateKey, verificationMethod);
 }
+
+// Minimal RLP encoder + EIP-1559 unsigned-tx builder for raw_hex fixtures.
+function rlpBytes(b) {
+  if (b.length === 1 && b[0] < 0x80) return b;
+  if (b.length < 56) return Buffer.concat([Buffer.from([0x80 + b.length]), b]);
+  throw new Error('fixture rlp: long strings unsupported');
+}
+function rlpInt(n) {
+  if (n === 0n) return rlpBytes(Buffer.alloc(0));
+  let hex = n.toString(16);
+  if (hex.length % 2) hex = '0' + hex;
+  return rlpBytes(Buffer.from(hex, 'hex'));
+}
+function rlpList(items) {
+  const payload = Buffer.concat(items);
+  if (payload.length < 56) return Buffer.concat([Buffer.from([0xc0 + payload.length]), payload]);
+  let lenHex = payload.length.toString(16);
+  if (lenHex.length % 2) lenHex = '0' + lenHex;
+  const lb = Buffer.from(lenHex, 'hex');
+  return Buffer.concat([Buffer.from([0xf7 + lb.length]), lb, payload]);
+}
+
+export function buildEip1559Tx({ chainId = 1n, to, valueWei, data = Buffer.alloc(0) }) {
+  const toBuf = to ? Buffer.from(to.replace(/^0x/, ''), 'hex') : Buffer.alloc(0);
+  const body = rlpList([
+    rlpInt(chainId), rlpInt(0n), rlpInt(1000000000n), rlpInt(20000000000n), rlpInt(21000n),
+    rlpBytes(toBuf), rlpInt(valueWei), rlpBytes(data), rlpList([]),
+  ]);
+  return '0x02' + body.toString('hex');
+}

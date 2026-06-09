@@ -82,12 +82,17 @@ treated as categorically worse than wrongful rejection.
 
 ## Per-rail support matrix
 
-OWS parses `to`/`value`/`data` for EVM transactions; all other chains arrive as
-`raw_hex` only. This verifier does not silently skip what it cannot read:
+The released OWS engine (v1.3.2) hands executables `transaction.raw_hex` only
+(the parsed `to`/`value`/`data` fields described in main-branch docs are newer
+than the latest release — discovered live-fire, not from docs). This verifier
+therefore decodes EVM payloads itself: EIP-1559, EIP-2930, and legacy RLP, with
+a chain-id cross-check against the signing context. Parsed fields are used
+as-is when a newer engine provides them. Other chains' payloads remain
+undecoded, and the verifier does not silently skip what it cannot read:
 
 | Rail (CAIP-2) | Credential plane¹ | Amount ceilings | Counterparty lists | Net effect |
 |---|---|---|---|---|
-| EVM (`eip155:*`) | ✅ | ✅ native value² | ✅ `to` address | **Full enforcement** |
+| EVM (`eip155:*`) | ✅ | ✅ native value² (decoded from `raw_hex`) | ✅ `to` address | **Full enforcement** |
 | Solana, Bitcoin, Tron, TON, Cosmos, Sui, XRPL, … | ✅ | ✗ payload unparsed | ✗ payload unparsed | **Verified-identity only**: mandates carrying binding amount/counterparty constraints **deny** on these rails; identity/temporal/revocation-scoped mandates work |
 
 ¹ proof, issuer, schema, validity, revocation, time windows, rail allowlists — chain-independent.

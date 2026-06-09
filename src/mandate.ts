@@ -129,7 +129,7 @@ export function evaluateMandate(
   // 2. Payload parsing reality (see README support matrix): OWS parses
   // to/value/data for EVM; other chains arrive as raw_hex only.
   const tx = ctx.transaction ?? {};
-  const payloadParsed = typeof tx.value === 'string' && typeof tx.to === 'string';
+  const payloadParsed = typeof tx.value === 'string';
 
   // 3. EVM contract-call guard: nonzero calldata means the native value is
   // not the real spend (token transfers, swaps). Unparseable spend under a
@@ -170,7 +170,14 @@ export function evaluateMandate(
   }
 
   const value = payloadParsed ? parseIntegerValue(tx.value as string) : undefined;
-  const to = payloadParsed ? (tx.to as string) : undefined;
+  const to = typeof tx.to === 'string' ? tx.to : undefined;
+
+  if (needsCounterparty && to === undefined) {
+    return deny(
+      '[counterparty] transaction has no recipient (contract creation) but the mandate binds counterparties — cannot establish who receives',
+      notes,
+    );
+  }
 
   const sameCurrencyOrDeny = (currency: string, what: string): MandateOutcome | null => {
     if (currency !== railDef.currency) {

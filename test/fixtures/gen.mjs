@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newIssuerKeys, signEddsaJcs2022, makeDidDocument, makeStatusList } from './lib.mjs';
+import { newIssuerKeys, signEddsaJcs2022, makeDidDocument, makeStatusList, buildEip1559Tx } from './lib.mjs';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
 rmSync(OUT, { recursive: true, force: true });
@@ -294,6 +294,14 @@ const cases = [
   { name: 'deny: allowedJurisdictionsOnly fail-closed', ctx: withCred('geo-allowonly'), expectAllow: false, reasonIncludes: 'allowedJurisdictionsOnly' },
   { name: 'deny: contract call under binding ceiling', ctx: withCred('valid-policy', {}, { transaction: { ...baseCtx.transaction, data: '0xa9059cbb' } }), expectAllow: false, reasonIncludes: 'calldata' },
   { name: 'deny: per-rail aggregate cap exceeded (deny-side state)', ctx: withCred('valid-policy', {}, { spending: { daily_total: '4800000000000000000', date: '2026-06-09' } }), expectAllow: false, reasonIncludes: 'aggregate cap' },
+
+  // -------- raw_hex EVM path (released-engine context shape: no parsed fields) --------
+  { name: 'allow: raw_hex EVM under ceiling (released engine shape)', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ to: MERCHANT_ADDR, valueWei: 500000000000000000n }) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: raw_hex EVM over ceiling', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ to: MERCHANT_ADDR, valueWei: 1500000000000000000n }) } }), expectAllow: false, reasonIncludes: 'per_transaction_ceiling' },
+  { name: 'deny: raw_hex blocked counterparty', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ to: BLOCKED_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'blockList' },
+  { name: 'deny: raw_hex chain id mismatch', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ chainId: 8453n, to: MERCHANT_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'chain-mismatch' },
+  { name: 'deny: raw_hex undecodable', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: '0xdeadbeef' } }), expectAllow: false, reasonIncludes: 'evm-parse' },
+  { name: 'deny: contract creation under counterparty binding', ctx: withCred('counterparty-allowlist', {}, { transaction: { raw_hex: buildEip1559Tx({ to: undefined, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'no recipient' },
 
   // -------- fail side: configuration --------
   { name: 'deny: missing policy_config', ctx: { ...baseCtx, policy_config: undefined }, expectAllow: false, reasonIncludes: 'policy_config missing' },

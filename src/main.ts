@@ -5,6 +5,7 @@ import { resolveDidDocument, findAssertionMethodKey } from './resolve.js';
 import { verifyEddsaJcs2022, decodeEd25519Multibase } from './proof.js';
 import { checkStatusEntry } from './revocation.js';
 import { evaluateMandate } from './mandate.js';
+import { parseEvmRawTx } from './evmtx.js';
 import { appendAudit } from './audit.js';
 import { sha256 } from './crypto.js';
 import type {
@@ -113,7 +114,47 @@ async function evaluate(ctx: PolicyContext, config: VerifierConfig): Promise<Ver
     notes.push('credential carries no credentialStatus entry — revocation not checkable for this credential');
   }
 
-  // 6. Mandate enforcement.
+  // 6. EVM payload parsing. The released OWS engine provides raw_hex only;
+  // parsed to/value/data appear in newer engine builds. Use parsed fields
+  // when present, otherwise decode the raw transaction ourselves, and
+  // cross-check the embedded chain id against the signing context.
+  if (ctx.chain_id.startsWith('eip155:') && ctx.transaction?.raw_hex && typeof ctx.transaction.value !== 'string') {
+    try {
+      const parsed = parseEvmRawTx(ctx.transaction.raw_hex);
+      const expectedChain = BigInt(ctx.chain_id.slice('eip155:'.length));
+      if (parsed.chainId !== undefined && parsed.chainId !== expectedChain) {
+        return {
+          allow: false,
+          reason: `op-verify: [chain-mismatch] transaction is for eip155:${parsed.chainId} but the signing context is ${ctx.chain_id}`,
+          notes,
+        };
+      }
+      if (parsed.chainId === undefined) {
+        notes.push('legacy transaction without an EIP-155 chain id — chain binding relies on the signing context only');
+      }
+      ctx = {
+        ...ctx,
+        transaction: {
+          ...ctx.transaction,
+          to: parsed.to,
+          value: parsed.value.toString(),
+          data: parsed.data,
+        },
+      };
+      notes.push('EVM transaction fields parsed from raw_hex by the verifier');
+      if (parsed.to === undefined) {
+        notes.push('contract-creation transaction (empty to) — counterparty bindings cannot match and will deny');
+      }
+    } catch (e) {
+      return {
+        allow: false,
+        reason: `op-verify: [evm-parse] cannot decode raw transaction: ${(e as Error).message}`,
+        notes,
+      };
+    }
+  }
+
+  // 7. Mandate enforcement.
   const mandate = evaluateMandate(ctx, cred, config);
   notes.push(...mandate.notes);
   if (!mandate.ok) return { allow: false, reason: `op-verify: ${mandate.reason}`, notes };
