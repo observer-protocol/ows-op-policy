@@ -68,8 +68,10 @@ decision trail.
 
 ## Open items
 
-- Alignment of the AIP draft texts' proof-suite language with the
-  eddsa-jcs-2022 implementation surface (tracked in the AIP repository); this
-  verifier implements the post-migration surface and rejects legacy suites.
+- Alignment of the AIP draft texts' proof-suite language: the v0.6–v0.8
+  drafts still cite `Ed25519Signature2026`, while this verifier implements
+  the eddsa-jcs-2022 surface as deployed in production and rejects legacy
+  suites. The draft-text alignment is a separate, already-tracked change in
+  the AIP repository and is deliberately not bundled into this project.
 - Final repository naming and publication.
 - Signed-decision (PEC) emission model for third-party operators.

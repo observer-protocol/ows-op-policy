@@ -51,6 +51,15 @@ declarative mirror rules (`allowed_chains` from the mandate's rails,
 
 ## What gets verified (credential plane)
 
+> **Proof-suite note (deliberate, not an oversight):** this verifier
+> implements the **eddsa-jcs-2022 surface as deployed by the Observer
+> Protocol issuance pipeline** — the production signing reality. The AIP
+> v0.6–v0.8 draft *texts* still cite the older `Ed25519Signature2026` suite
+> name; aligning the draft language is tracked separately in the
+> [AIP repository](https://github.com/observer-protocol/aip) and is
+> intentionally **not** part of this project. Where draft text and deployed
+> surface disagree, this verifier follows the deployed surface.
+
 | Check | Behavior |
 |---|---|
 | Proof suite | `DataIntegrityProof` / `eddsa-jcs-2022` (W3C VC Data Integrity). Legacy Ed25519Signature20xx suites are **rejected** |
