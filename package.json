@@ -1,0 +1,23 @@
+{
+  "name": "ows-op-policy",
+  "version": "0.1.0",
+  "description": "Observer Protocol delegation-credential verifier for the Open Wallet Standard policy engine. Pre-signing enforcement of signed agent mandates as an OWS custom-executable policy.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=cjs --banner:js='#!/usr/bin/env node' --outfile=dist/ows-op-verify.cjs && chmod +x dist/ows-op-verify.cjs",
+    "typecheck": "tsc --noEmit",
+    "fixtures": "node test/fixtures/gen.mjs",
+    "test": "npm run build && npm run fixtures && node test/run.mjs",
+    "livefire": "node harness/live-fire.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.2",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
