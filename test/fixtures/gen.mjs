@@ -289,7 +289,7 @@ const cases = [
   { name: 'deny: one-time past execution_deadline', ctx: withCred('one-time', {}, { timestamp: '2026-06-11T00:00:00Z' }), expectAllow: false, reasonIncludes: 'execution_deadline' },
   { name: 'deny: velocity cap exceeded', ctx: withCred('velocity', {}, { spending: { daily_total: '1800000000000000000', date: '2026-06-09' } }), expectAllow: false, reasonIncludes: 'dailyVolumeCap' },
   { name: 'deny: ceiling currency mismatch (no FX)', ctx: withCred('currency-mismatch'), expectAllow: false, reasonIncludes: 'same-currency' },
-  { name: 'deny: binding ceiling on unparsed rail (tron)', ctx: withCred('tron-with-ceiling', {}, { chain_id: 'tron:mainnet', transaction: { raw_hex: '0a02bb8e' } }), expectAllow: false, reasonIncludes: 'support matrix' },
+  { name: 'deny: binding ceiling on unparsed rail (tron)', ctx: withCred('tron-with-ceiling', {}, { chain_id: 'tron:mainnet', transaction: { raw_hex: '0a02bb8e' } }), expectAllow: false, reasonIncludes: 'not parsed' },
   { name: 'deny: requireIssuerClassIn with no attestation source', ctx: withCred('issuer-class'), expectAllow: false, reasonIncludes: 'issuer class' },
   { name: 'deny: allowedJurisdictionsOnly fail-closed', ctx: withCred('geo-allowonly'), expectAllow: false, reasonIncludes: 'allowedJurisdictionsOnly' },
   { name: 'deny: contract call under binding ceiling', ctx: withCred('valid-policy', {}, { transaction: { ...baseCtx.transaction, data: '0xa9059cbb' } }), expectAllow: false, reasonIncludes: 'calldata' },
@@ -301,7 +301,7 @@ const cases = [
   { name: 'deny: raw_hex blocked counterparty', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ to: BLOCKED_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'blockList' },
   { name: 'deny: raw_hex chain id mismatch', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ chainId: 8453n, to: MERCHANT_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'chain-mismatch' },
   { name: 'deny: raw_hex undecodable', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: '0xdeadbeef' } }), expectAllow: false, reasonIncludes: 'evm-parse' },
-  { name: 'deny: contract creation under counterparty binding', ctx: withCred('counterparty-allowlist', {}, { transaction: { raw_hex: buildEip1559Tx({ to: undefined, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'no recipient' },
+  { name: 'deny: contract creation under counterparty binding', ctx: withCred('counterparty-allowlist', {}, { transaction: { raw_hex: buildEip1559Tx({ to: undefined, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'no resolvable recipient' },
 
   // -------- fail side: configuration --------
   { name: 'deny: missing policy_config', ctx: { ...baseCtx, policy_config: undefined }, expectAllow: false, reasonIncludes: 'policy_config missing' },

@@ -168,6 +168,28 @@ export interface RailDef {
   rail: string; // Observer Protocol rail name, e.g. "ethereum-mainnet"
   currency: string; // rail-native unit for transaction.value, e.g. "ETH"
   decimals: number; // scale of transaction.value relative to `currency`
+  family: 'evm' | 'solana' | 'other'; // payload-parsing family
+}
+
+export interface TokenDefConfig {
+  symbol: string;
+  decimals: number;
+}
+
+// The single asset/amount/recipient view the mandate enforces against,
+// resolved from either an EVM or Solana payload. `amount` is raw (unscaled)
+// units of `assetSymbol`; `decimals` is that asset's scale.
+export interface ResolvedTransfer {
+  kind: 'native' | 'evm-token' | 'sol-system' | 'sol-spl-checked' | 'sol-spl' | 'unparsed';
+  assetSymbol?: string; // e.g. "ETH", "SOL", "USDC" — undefined if undeterminable
+  amount?: bigint; // raw units of assetSymbol
+  decimals?: number;
+  recipient?: string; // wallet (native/evm-token/sol-system) or token account (sol-spl*)
+  recipientKind: 'wallet' | 'spl-token-account' | 'none';
+  notes: string[];
+  // Set when resolution itself establishes the transfer is unenforceable for
+  // a binding amount/counterparty constraint (mandate turns this into a deny).
+  unenforceable?: string;
 }
 
 export interface VerifierConfig {
@@ -184,6 +206,8 @@ export interface VerifierConfig {
   cacheDir: string;
   auditLog: string;
   rails: Record<string, RailDef>;
+  evmTokens?: Record<string, TokenDefConfig>; // lowercased ERC-20 contract → asset
+  solanaMints?: Record<string, TokenDefConfig>; // base58 SPL mint → asset
   allowContractCalls: boolean;
   transactionCategory?: string;
   counterpartyAddressMap?: Record<string, string[]>; // DID -> rail addresses

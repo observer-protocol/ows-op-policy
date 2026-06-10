@@ -8,14 +8,20 @@ import type { RailDef, VerifierConfig } from './types.js';
 // in any other currency cannot be verified on that rail and DENIES.
 // Extend or override per deployment via config.rails.
 export const DEFAULT_RAILS: Record<string, RailDef> = {
-  'eip155:1': { rail: 'ethereum-mainnet', currency: 'ETH', decimals: 18 },
-  'eip155:8453': { rail: 'base-mainnet', currency: 'ETH', decimals: 18 },
-  'eip155:137': { rail: 'polygon-mainnet', currency: 'POL', decimals: 18 },
-  'eip155:42161': { rail: 'arbitrum-one', currency: 'ETH', decimals: 18 },
-  'eip155:10': { rail: 'optimism-mainnet', currency: 'ETH', decimals: 18 },
-  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': { rail: 'solana-mainnet', currency: 'SOL', decimals: 9 },
-  'bip122:000000000019d6689c085ae165831e93': { rail: 'bitcoin-mainnet', currency: 'BTC', decimals: 8 },
-  'tron:mainnet': { rail: 'usdt-trc20', currency: 'TRX', decimals: 6 },
+  'eip155:1': { rail: 'ethereum-mainnet', currency: 'ETH', decimals: 18, family: 'evm' },
+  'eip155:8453': { rail: 'base-mainnet', currency: 'ETH', decimals: 18, family: 'evm' },
+  'eip155:137': { rail: 'polygon-mainnet', currency: 'POL', decimals: 18, family: 'evm' },
+  'eip155:42161': { rail: 'arbitrum-one', currency: 'ETH', decimals: 18, family: 'evm' },
+  'eip155:10': { rail: 'optimism-mainnet', currency: 'ETH', decimals: 18, family: 'evm' },
+  // Solana mainnet — CAIP-2 chain id IS the genesis-hash identifier. The
+  // signed message carries a recentBlockhash, NOT the genesis hash, so the
+  // cluster cannot be re-derived from the static payload offline; this
+  // mapping is the source of truth for which cluster ctx.chain_id names.
+  'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp': { rail: 'solana-mainnet', currency: 'SOL', decimals: 9, family: 'solana' },
+  // Solana devnet, for completeness (distinct genesis-hash CAIP-2).
+  'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1': { rail: 'solana-devnet', currency: 'SOL', decimals: 9, family: 'solana' },
+  'bip122:000000000019d6689c085ae165831e93': { rail: 'bitcoin-mainnet', currency: 'BTC', decimals: 8, family: 'other' },
+  'tron:mainnet': { rail: 'usdt-trc20', currency: 'TRX', decimals: 6, family: 'other' },
 };
 
 function expandHome(p: string): string {
@@ -72,6 +78,8 @@ export function parseConfig(raw: unknown): VerifierConfig {
     cacheDir: expandHome(typeof c['cacheDir'] === 'string' ? (c['cacheDir'] as string) : '~/.cache/ows-op-policy'),
     auditLog: expandHome(typeof c['auditLog'] === 'string' ? (c['auditLog'] as string) : '~/.cache/ows-op-policy/decisions.jsonl'),
     rails: { ...DEFAULT_RAILS, ...railsOverride },
+    evmTokens: (c['evmTokens'] as Record<string, { symbol: string; decimals: number }>) ?? undefined,
+    solanaMints: (c['solanaMints'] as Record<string, { symbol: string; decimals: number }>) ?? undefined,
     allowContractCalls: c['allowContractCalls'] === true,
     transactionCategory: typeof c['transactionCategory'] === 'string' ? (c['transactionCategory'] as string) : undefined,
     counterpartyAddressMap: (c['counterpartyAddressMap'] as Record<string, string[]>) ?? undefined,

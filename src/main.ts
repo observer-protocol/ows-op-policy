@@ -5,6 +5,7 @@ import { resolveDidDocument, findAssertionMethodKey } from './resolve.js';
 import { verifyEddsaJcs2022, decodeEd25519Multibase } from './proof.js';
 import { checkStatusEntry } from './revocation.js';
 import { evaluateMandate } from './mandate.js';
+import { resolveTransfer } from './resolve-transfer.js';
 import { parseEvmRawTx } from './evmtx.js';
 import { appendAudit } from './audit.js';
 import { sha256 } from './crypto.js';
@@ -154,8 +155,15 @@ async function evaluate(ctx: PolicyContext, config: VerifierConfig): Promise<Ver
     }
   }
 
-  // 7. Mandate enforcement.
-  const mandate = evaluateMandate(ctx, cred, config);
+  // 7. Resolve the transfer (asset/amount/recipient) from the payload, then
+  // enforce the mandate against it. EVM fields were populated above; Solana
+  // is parsed inside the resolver from raw_hex.
+  const railDef = config.rails[ctx.chain_id];
+  if (!railDef) {
+    return { allow: false, reason: `op-verify: [rails] chain ${ctx.chain_id} has no rail mapping in config.rails`, notes };
+  }
+  const resolved = resolveTransfer(ctx, railDef, config);
+  const mandate = evaluateMandate(ctx, cred, config, resolved);
   notes.push(...mandate.notes);
   if (!mandate.ok) return { allow: false, reason: `op-verify: ${mandate.reason}`, notes };
 

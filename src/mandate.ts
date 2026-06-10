@@ -2,6 +2,7 @@ import type {
   ObserverDelegationCredential,
   PolicyContext,
   RailDef,
+  ResolvedTransfer,
   TradingMandate,
   VerifierConfig,
 } from './types.js';
@@ -109,6 +110,7 @@ export function evaluateMandate(
   ctx: PolicyContext,
   cred: ObserverDelegationCredential,
   config: VerifierConfig,
+  resolved: ResolvedTransfer,
 ): MandateOutcome {
   const notes: string[] = [];
   const subject = cred.credentialSubject;
@@ -126,17 +128,14 @@ export function evaluateMandate(
     );
   }
 
-  // 2. Payload parsing reality (see README support matrix): OWS parses
-  // to/value/data for EVM; other chains arrive as raw_hex only.
+  // 2. Resolved transfer — the single {asset, amount, recipient} view from
+  // either an EVM or Solana payload (see resolve-transfer.ts). Amount/currency
+  // comparisons below are against the ACTUAL transferred asset (e.g. USDC at 6
+  // decimals), not the chain-native unit.
+  notes.push(...resolved.notes);
   const tx = ctx.transaction ?? {};
-  const payloadParsed = typeof tx.value === 'string';
 
-  // 3. EVM contract-call guard: nonzero calldata means the native value is
-  // not the real spend (token transfers, swaps). Unparseable spend under a
-  // binding amount constraint fails closed.
-  const hasCalldata = typeof tx.data === 'string' && tx.data !== '' && tx.data !== '0x';
-
-  // Which binding constraints require a parsed payload?
+  // Which binding constraints require an established amount / recipient?
   const authCfg = subject.authorizationConfig;
   const level = subject.authorizationLevel;
   const needsAmount =
@@ -153,36 +152,49 @@ export function evaluateMandate(
     (tm?.counterparty?.allowList?.length ?? 0) > 0 ||
     (tm?.counterparty?.blockList?.length ?? 0) > 0;
 
-  if (!payloadParsed && (needsAmount || needsCounterparty)) {
-    return deny(
-      `[support-matrix] mandate carries binding amount/counterparty constraints but ${ctx.chain_id} transactions are not payload-parsed by this verifier (raw_hex only) — see README per-rail support matrix; contributions welcome`,
-      notes,
-    );
-  }
-  if (payloadParsed && hasCalldata && needsAmount && !config.allowContractCalls) {
-    return deny(
-      `[contract-call] transaction carries calldata (contract call); the native value is not a reliable measure of spend under a binding amount constraint. Set config.allowContractCalls=true only if you accept that token/contract spends bypass amount ceilings`,
-      notes,
-    );
-  }
-  if (hasCalldata && config.allowContractCalls) {
-    notes.push('contract calldata present; amount ceilings were applied to NATIVE value only (allowContractCalls=true)');
-  }
+  let asset = resolved.assetSymbol;
+  let decimals = resolved.decimals ?? railDef.decimals;
+  let value = resolved.amount;
+  let to = resolved.recipient;
 
-  const value = payloadParsed ? parseIntegerValue(tx.value as string) : undefined;
-  const to = typeof tx.to === 'string' ? tx.to : undefined;
+  // Fail-closed: a binding amount/counterparty constraint we cannot establish
+  // from the payload denies. The one escape is the explicit EVM
+  // allowContractCalls knob, which falls back to native-value measurement of
+  // an unrecognised call (and says so loudly).
+  if ((needsAmount || needsCounterparty) && resolved.unenforceable) {
+    const evmNativeFallback =
+      config.allowContractCalls && railDef.family === 'evm' && typeof tx.value === 'string';
+    if (!evmNativeFallback) {
+      return deny(`[unenforceable] ${resolved.unenforceable}`, notes);
+    }
+    value = parseIntegerValue(tx.value as string);
+    asset = railDef.currency;
+    decimals = railDef.decimals;
+    to = typeof tx.to === 'string' ? tx.to : undefined;
+    notes.push(
+      'allowContractCalls=true: an unrecognised call was measured by NATIVE value only — token/contract spend may bypass amount ceilings',
+    );
+  }
 
   if (needsCounterparty && to === undefined) {
     return deny(
-      '[counterparty] transaction has no recipient (contract creation) but the mandate binds counterparties — cannot establish who receives',
+      '[counterparty] the transaction has no resolvable recipient but the mandate binds counterparties — cannot establish who receives',
       notes,
+    );
+  }
+  if (needsCounterparty && resolved.recipientKind === 'spl-token-account') {
+    notes.push(
+      'counterparty matching on this SPL transfer is against the destination TOKEN ACCOUNT address; matching by wallet/DID requires that token account to be listed in the allowlist or counterpartyAddressMap (owner resolution is not done offline)',
     );
   }
 
   const sameCurrencyOrDeny = (currency: string, what: string): MandateOutcome | null => {
-    if (currency !== railDef.currency) {
+    if (asset === undefined) {
+      return deny(`[same-currency] ${what} requires a known asset but the transfer asset could not be established`, notes);
+    }
+    if (currency !== asset) {
       return deny(
-        `[same-currency] ${what} is denominated in ${currency} but rail ${railDef.rail} settles native ${railDef.currency} — no FX conversion is performed (AIP v0.8 same-currency invariant), so scope cannot be established`,
+        `[same-currency] ${what} is denominated in ${currency} but this transfer moves ${asset} — no FX conversion is performed (AIP v0.8 same-currency invariant), so scope cannot be established`,
         notes,
       );
     }
@@ -204,7 +216,7 @@ export function evaluateMandate(
     const c = scope.per_transaction_ceiling;
     const mismatch = sameCurrencyOrDeny(c.currency, 'per_transaction_ceiling');
     if (mismatch) return mismatch;
-    const ceiling = parseDecimalScaled(c.amount, railDef.decimals);
+    const ceiling = parseDecimalScaled(c.amount, decimals);
     if ((value as bigint) > ceiling) {
       return deny(
         `[ceiling] transaction value exceeds per_transaction_ceiling of ${c.amount} ${c.currency}`,
@@ -250,7 +262,7 @@ export function evaluateMandate(
     }
     const mismatch = sameCurrencyOrDeny(ot.currency, 'one-time amount');
     if (mismatch) return mismatch;
-    const exact = parseDecimalScaled(ot.amount, railDef.decimals);
+    const exact = parseDecimalScaled(ot.amount, decimals);
     if ((value as bigint) !== exact) {
       return deny(`[one-time] amount must be exactly ${ot.amount} ${ot.currency}`, notes);
     }
@@ -275,12 +287,12 @@ export function evaluateMandate(
     const mismatch = sameCurrencyOrDeny(rc.ceiling_currency, 'recurring ceiling');
     if (mismatch) return mismatch;
     if (rc.per_transaction_max !== undefined) {
-      const cap = parseDecimalScaled(rc.per_transaction_max, railDef.decimals);
+      const cap = parseDecimalScaled(rc.per_transaction_max, decimals);
       if ((value as bigint) > cap) {
         return deny(`[recurring] value exceeds per_transaction_max ${rc.per_transaction_max} ${rc.ceiling_currency}`, notes);
       }
     }
-    const ceiling = parseDecimalScaled(rc.ceiling_amount, railDef.decimals);
+    const ceiling = parseDecimalScaled(rc.ceiling_amount, decimals);
     const dailyTotal = ctx.spending?.daily_total !== undefined ? parseIntegerValue(ctx.spending.daily_total) : undefined;
     if (dailyTotal !== undefined && dailyTotal + (value as bigint) > ceiling) {
       // The per-key daily counter is a LOWER BOUND on period spend, so an
@@ -299,17 +311,17 @@ export function evaluateMandate(
     const pol = authCfg.policy;
     const caps = pol.per_rail_caps?.[railDef.rail] ?? pol.per_rail_caps?.[ctx.chain_id];
     if (caps) {
-      const capCurrency = caps.currency ?? railDef.currency;
+      const capCurrency = caps.currency ?? asset ?? railDef.currency;
       const mismatch = sameCurrencyOrDeny(capCurrency, `per_rail_caps[${railDef.rail}]`);
       if (mismatch) return mismatch;
       if (caps.per_transaction !== undefined) {
-        const cap = parseDecimalScaled(caps.per_transaction, railDef.decimals);
+        const cap = parseDecimalScaled(caps.per_transaction, decimals);
         if ((value as bigint) > cap) {
           return deny(`[per-rail-cap] value exceeds per_transaction cap ${caps.per_transaction} ${capCurrency} on ${railDef.rail}`, notes);
         }
       }
       if (caps.aggregate !== undefined) {
-        const agg = parseDecimalScaled(caps.aggregate, railDef.decimals);
+        const agg = parseDecimalScaled(caps.aggregate, decimals);
         const dailyTotal = ctx.spending?.daily_total !== undefined ? parseIntegerValue(ctx.spending.daily_total) : undefined;
         if (dailyTotal !== undefined && dailyTotal + (value as bigint) > agg) {
           return deny(`[per-rail-cap] observed spend today plus this transaction exceeds aggregate cap ${caps.aggregate} ${capCurrency} on ${railDef.rail}`, notes);
@@ -320,10 +332,10 @@ export function evaluateMandate(
     if (pol.rail_preference && !pol.rail_preference.some((r) => railMatches(r, railDef, ctx.chain_id))) {
       notes.push(`rail ${railDef.rail} is outside the policy rail_preference list (preference ordering is advisory)`);
     }
-    if (pol.escalation_threshold?.amount && pol.escalation_threshold.currency === railDef.currency) {
-      const th = parseDecimalScaled(pol.escalation_threshold.amount, railDef.decimals);
+    if (pol.escalation_threshold?.amount && pol.escalation_threshold.currency === asset) {
+      const th = parseDecimalScaled(pol.escalation_threshold.amount, decimals);
       if ((value as bigint) > th) {
-        notes.push(`transaction exceeds escalation_threshold ${pol.escalation_threshold.amount} ${railDef.currency} — human notification expected upstream (not performed by this verifier)`);
+        notes.push(`transaction exceeds escalation_threshold ${pol.escalation_threshold.amount} ${asset} — human notification expected upstream (not performed by this verifier)`);
       }
     }
   }
@@ -334,7 +346,7 @@ export function evaluateMandate(
       if (!tm.unit) return deny('[trading-mandate] maxNotionalPerOrder present without unit — verifiers MUST NOT infer units', notes);
       const mismatch = sameCurrencyOrDeny(tm.unit, 'tradingMandate.maxNotionalPerOrder');
       if (mismatch) return mismatch;
-      const cap = BigInt(tm.maxNotionalPerOrder) * 10n ** BigInt(railDef.decimals);
+      const cap = BigInt(tm.maxNotionalPerOrder) * 10n ** BigInt(decimals);
       if ((value as bigint) > cap) {
         return deny(`[notional] transaction value exceeds maxNotionalPerOrder ${tm.maxNotionalPerOrder} ${tm.unit}`, notes);
       }
@@ -387,7 +399,7 @@ export function evaluateMandate(
         return deny('[velocity] mandate carries velocity caps but the signing context provided no spending.daily_total counter', notes);
       }
       const projected = dailyTotal + (value as bigint);
-      const scale = 10n ** BigInt(railDef.decimals);
+      const scale = 10n ** BigInt(decimals);
       if (vel.dailyVolumeCap !== undefined && projected > BigInt(vel.dailyVolumeCap) * scale) {
         return deny(`[velocity] projected daily volume exceeds dailyVolumeCap ${vel.dailyVolumeCap} ${tm.unit}`, notes);
       }

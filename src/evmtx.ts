@@ -13,6 +13,58 @@ export interface ParsedEvmTx {
   data: string; // 0x…
 }
 
+export interface EvmTokenTransfer {
+  selector: string;
+  recipient: string; // 0x… wallet address being paid
+  amount: bigint; // raw token units (scale by the token's own decimals)
+}
+
+// ERC-20 / EIP-3009 transfer selectors. For USDC the canonical agent-payment
+// path is EIP-3009 transferWithAuthorization (x402); plain transfer/transferFrom
+// are also decoded.
+const SEL_TRANSFER = 'a9059cbb'; // transfer(address,uint256)
+const SEL_TRANSFER_FROM = '23b872dd'; // transferFrom(address,address,uint256)
+const SEL_TRANSFER_WITH_AUTH = 'e3ee160e'; // transferWithAuthorization(address,address,uint256,...)
+const SEL_RECEIVE_WITH_AUTH = 'ef55bec6'; // receiveWithAuthorization(address,address,uint256,...)
+
+function word(data: Buffer, wordIndex: number): Buffer {
+  const start = 4 + wordIndex * 32;
+  if (start + 32 > data.length) throw new Error(`token calldata too short for word ${wordIndex}`);
+  return data.subarray(start, start + 32);
+}
+const addrFromWord = (w: Buffer): string => '0x' + w.subarray(12).toString('hex'); // last 20 bytes
+const uintFromWord = (w: Buffer): bigint => BigInt('0x' + w.toString('hex'));
+
+/**
+ * Decode a known ERC-20 / EIP-3009 token transfer from calldata. Returns null
+ * for any selector we don't recognise (caller treats unknown calldata per its
+ * contract-call policy). Recipient is the wallet being paid; amount is in the
+ * token's own raw units.
+ */
+export function parseErc20Transfer(dataHex: string): EvmTokenTransfer | null {
+  const hex = dataHex.startsWith('0x') ? dataHex.slice(2) : dataHex;
+  if (hex.length < 8) return null;
+  const data = Buffer.from(hex, 'hex');
+  const selector = hex.slice(0, 8).toLowerCase();
+  try {
+    switch (selector) {
+      case SEL_TRANSFER: // transfer(to, amount)
+        return { selector, recipient: addrFromWord(word(data, 0)), amount: uintFromWord(word(data, 1)) };
+      case SEL_TRANSFER_FROM: // transferFrom(from, to, amount)
+        return { selector, recipient: addrFromWord(word(data, 1)), amount: uintFromWord(word(data, 2)) };
+      case SEL_TRANSFER_WITH_AUTH: // transferWithAuthorization(from, to, value, ...)
+      case SEL_RECEIVE_WITH_AUTH: // receiveWithAuthorization(from, to, value, ...)
+        return { selector, recipient: addrFromWord(word(data, 1)), amount: uintFromWord(word(data, 2)) };
+      default:
+        return null;
+    }
+  } catch {
+    // a recognised selector with truncated/malformed args → treat as
+    // undecodable (caller fails closed under a binding constraint)
+    return null;
+  }
+}
+
 interface RlpItem {
   bytes?: Buffer;
   list?: RlpItem[];
