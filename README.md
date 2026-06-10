@@ -91,30 +91,67 @@ treated as categorically worse than wrongful rejection.
 
 ## Per-rail support matrix
 
-The released OWS engine (v1.3.2) hands executables `transaction.raw_hex` only
-(the parsed `to`/`value`/`data` fields described in main-branch docs are newer
-than the latest release — discovered live-fire, not from docs). This verifier
-therefore decodes EVM payloads itself: EIP-1559, EIP-2930, and legacy RLP, with
-a chain-id cross-check against the signing context. Parsed fields are used
-as-is when a newer engine provides them. Other chains' payloads remain
-undecoded, and the verifier does not silently skip what it cannot read:
+The released OWS engine (v1.3.2) hands executables `transaction.raw_hex` only —
+the full serialized transaction (the parsed `to`/`value`/`data` fields in
+main-branch docs are newer than the latest release; discovered live-fire, not
+from docs, for **both** EVM and Solana). This verifier decodes the payload
+itself, zero runtime dependencies, and does not silently skip what it can't
+read:
 
-| Rail (CAIP-2) | Credential plane¹ | Amount ceilings | Counterparty lists | Net effect |
-|---|---|---|---|---|
-| EVM (`eip155:*`) | ✅ | ✅ native value² (decoded from `raw_hex`) | ✅ `to` address | **Full enforcement** |
-| Solana, Bitcoin, Tron, TON, Cosmos, Sui, XRPL, … | ✅ | ✗ payload unparsed | ✗ payload unparsed | **Verified-identity only**: mandates carrying binding amount/counterparty constraints **deny** on these rails; identity/temporal/revocation-scoped mandates work |
+| Rail | Credential plane¹ | Native amount | Token amount (USDC/USDT) | Counterparty | Net effect |
+|---|---|---|---|---|---|
+| EVM (`eip155:*`) | ✅ | ✅ ETH/POL value | ✅ ERC-20 + EIP-3009 `transfer*` decoded at the token's own decimals | ✅ recipient (`to`, or the token-transfer `to`) | **Full enforcement** |
+| Solana (`solana:*`) | ✅ | ✅ SOL (System transfer) | ✅ SPL **TransferChecked** (mint-identified, 6-dec) | ✅ wallet (SOL) / token account (SPL)³ | **Full enforcement** (legacy + v0), within the fail-closed boundaries below |
+| Bitcoin, Tron, TON, Cosmos, Sui, XRPL, … | ✅ | ✗ payload unparsed | ✗ | ✗ | **Verified-identity only**: binding amount/counterparty mandates **deny**; identity/temporal/revocation-scoped mandates work |
 
 ¹ proof, issuer, schema, validity, revocation, time windows, rail allowlists — chain-independent.
-² Native value only. Transactions with calldata (token transfers, contract
-calls) **deny** under a binding amount constraint unless
-`allowContractCalls: true` is set deliberately — the native value is not a
-reliable measure of a contract call's spend. ERC-20 `transfer` parsing is a
-planned extension.
+
+**EVM payloads:** EIP-1559 / EIP-2930 / legacy RLP, with a `chainId`
+cross-check against the signing context. Native value, plus ERC-20
+`transfer`/`transferFrom` and EIP-3009 `transferWithAuthorization` /
+`receiveWithAuthorization` (the x402 USDC path) decoded at the token's
+registered decimals. Calldata to an **unknown** contract still denies under a
+binding amount constraint unless `allowContractCalls: true` (native-value-only
+measurement, said loudly).
+
+**Solana payloads — what is enforced:** legacy and v0 (versioned) messages;
+System-program SOL transfers; SPL Token **TransferChecked** for USDC/USDT
+(mint identified from the instruction, amount at 6 decimals, on-chain decimals
+cross-checked against the registry). Same-currency invariant (no FX), identical
+to EVM.
+
+**Solana payloads — fail-closed boundaries (deny any binding amount/counterparty
+constraint; stated plainly, not stretched):**
+- **Address Lookup Tables (v0 ALUT):** accounts loaded from on-chain tables are
+  not in the static message. No on-chain reads in v1 → **deny** when a
+  constraint would depend on an ALUT-loaded account.
+- **Plain SPL `Transfer` (non-checked):** the mint is not in the instruction, so
+  the asset cannot be proven offline → **deny** under a token ceiling. Use
+  `TransferChecked` for enforceable token payments. (The asset is never
+  guessed.)
+- **Opaque / unhandled instructions** (unknown program, or unhandled
+  System/Token instruction that could move value) alongside a transfer →
+  **deny**: every instruction must satisfy the mandate. Benign `ComputeBudget`
+  and `Memo` instructions do not defeat enforcement.
+- **Multiple value transfers** in one transaction → **deny** (attribution
+  unsupported in v1).
+- **Network binding:** a Solana message carries a `recentBlockhash`, **not** the
+  genesis hash, so mainnet-vs-devnet cannot be re-derived from the static
+  payload (unlike EVM's embedded `chainId`). The cluster is taken from the
+  PolicyContext `chain_id` via the rail map; this is trusted input, documented
+  here rather than faked. *(Open question flagged for design review.)*
+
+³ SPL transfers move between **token accounts**, not wallets. The verifier
+matches the destination **token account** address against the mandate's
+counterparty list; matching by wallet/DID requires that token account to be
+listed (in the allowlist or `counterpartyAddressMap`). Deriving a token
+account's owner offline (associated-token-account derivation) is a planned
+extension; until then owner-based SPL counterparty matching fails closed.
 
 **Contributing a rail:** implement payload parsing for the chain (amount +
-recipient from `raw_hex`), add the CAIP-2 → rail/currency/decimals mapping to
-`DEFAULT_RAILS`, and add pass/fail fixtures for every rule the parser enables.
-PRs are welcome — the conformance runner (`test/run.mjs`) is the gate.
+recipient), add the CAIP-2 → rail mapping with its `family` to `DEFAULT_RAILS`,
+and add pass/fail fixtures for every rule the parser enables. PRs are welcome —
+the conformance runner (`test/run.mjs`) is the gate.
 
 ## Configuration
 
@@ -132,10 +169,12 @@ behavioral value out loud; the table is the contract.
 | `revocation.onUnreachable` | written explicitly | `cache-then-deny` (the only implemented behavior, on purpose) |
 | `revocation.fetchTimeoutMs` | written explicitly (1500) | Per-fetch budget inside OWS's hard 5s executable timeout |
 | `didCache.maxStalenessHours` | written explicitly (24) | Same refresh-first policy for issuer DID documents |
-| `rails` | defaults built in | CAIP-2 → `{rail, currency, decimals}` map; extend/override per deployment |
-| `allowContractCalls` | default `false` | Permit EVM calldata under binding amount constraints (read the footnote first) |
+| `rails` | defaults built in | CAIP-2 → `{rail, currency, decimals, family}` map; extend/override per deployment |
+| `evmTokens` | defaults built in | lowercased ERC-20 contract → `{symbol, decimals}` (USDC/USDT preloaded); identifies token transfers |
+| `solanaMints` | defaults built in | base58 SPL mint → `{symbol, decimals}` (USDC/USDT preloaded) |
+| `allowContractCalls` | default `false` | Permit **unknown** EVM contract calldata under binding amount constraints, measured by native value only (read the footnote first) |
 | `transactionCategory` | — | Category this key's transactions are declared as, matched against `allowed_transaction_categories` |
-| `counterpartyAddressMap` | — | DID → addresses, for mandates that pin counterparties by DID |
+| `counterpartyAddressMap` | — | DID → addresses, for mandates that pin counterparties by DID (use token-account addresses for SPL) |
 | `cacheDir` / `auditLog` | written explicitly | Cache location; JSONL decision log |
 | `offline.didDocumentPath` / `offline.statusListPath` | — | Air-gapped/test overrides; bypass network entirely |
 
@@ -154,6 +193,12 @@ extension (see `docs/SCOPE.md`).
   **denies** (the binding cannot be established). 
 - **`requireIssuerClassIn` denies.** Verifying a counterparty's attested issuer
   class needs an attestation source this executable doesn't have yet.
+- **SPL counterparty matching is against the token account, not the wallet
+  owner.** Offline associated-token-account derivation is a planned extension;
+  until then, list token-account addresses in the allowlist or fail closed.
+- **Solana v0 ALUT and plain SPL `Transfer` fail closed** under binding
+  amount/counterparty constraints (no on-chain reads; mint not in a plain
+  Transfer). See the support matrix for the full boundary list.
 - **Velocity/period ceilings are deny-side only.** The only state OWS provides
   is a per-API-key, per-calendar-day, native-value counter — a lower bound on
   any rolling window. An overshoot it can see is a real overshoot (deny); full
