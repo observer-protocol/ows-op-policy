@@ -93,7 +93,7 @@ const keyOut = ows(['key', 'create', '--name', 'livefire-agent', '--wallet', 'li
 const token = keyOut.split('\n').find((l) => l.trim().startsWith('ows_key_'))?.trim();
 if (!token) die(`could not parse API token from key create output:\n${keyOut}`);
 
-const { buildEip1559Tx } = await import('../test/fixtures/lib.mjs');
+const { buildEip1559Tx, buildSolanaTx, ixSystemTransfer, solPubkey } = await import('../test/fixtures/lib.mjs');
 const MERCHANT = '0xA11CE00000000000000000000000000000000001';
 const overTx = buildEip1559Tx({ to: MERCHANT, valueWei: 2_000_000_000_000_000_000n }); // 2 ETH > 1.0 ceiling
 const underTx = buildEip1559Tx({ to: MERCHANT, valueWei: 500_000_000_000_000_000n }); // 0.5 ETH
@@ -110,6 +110,34 @@ const allowOut = ows(['sign', 'tx', '--chain', 'eip155:1', '--wallet', 'livefire
 if (!/^[0-9a-f]{120,}/m.test(allowOut.trim())) die(`expected signature bytes, got:\n${allowOut}`);
 console.log(`    ✓ signature returned (${allowOut.trim().length} hex chars)`);
 
+// --- Solana leg: a second policy/key bound to a Solana-scoped credential ----
+say('SOLANA: register a Solana-scoped policy + agent key');
+const solCredPath = join(FIXTURES, 'cred-sol-native.json'); // ceiling 1.0 SOL
+const solPolicy = { ...policy, id: 'op-delegation-sol-livefire', config: { ...config, credentialPath: solCredPath } };
+const solPolicyPath = join(TMP, 'op-delegation-sol-livefire.json');
+writeFileSync(solPolicyPath, JSON.stringify(solPolicy, null, 2));
+ows(['policy', 'create', '--file', solPolicyPath]);
+const solKeyOut = ows(['key', 'create', '--name', 'livefire-sol', '--wallet', 'livefire-treasury', '--policy', 'op-delegation-sol-livefire']);
+const solToken = solKeyOut.split('\n').find((l) => l.trim().startsWith('ows_key_'))?.trim();
+if (!solToken) die(`could not parse Solana API token:\n${solKeyOut}`);
+
+const SOL_AGENT = solPubkey(1);
+const SOL_MERCHANT = solPubkey(2);
+const solOver = buildSolanaTx({ version: 'legacy', signer: SOL_AGENT, instructions: [ixSystemTransfer(SOL_AGENT, SOL_MERCHANT, 2_000_000_000)] }); // 2 SOL > 1.0 ceiling
+const solUnder = buildSolanaTx({ version: 'legacy', signer: SOL_AGENT, instructions: [ixSystemTransfer(SOL_AGENT, SOL_MERCHANT, 500_000_000)] }); // 0.5 SOL
+
+say('SOLANA DENY side: agent signs 2 SOL against a 1.0 SOL mandate ceiling');
+const solDenyOut = ows(['sign', 'tx', '--chain', 'solana', '--wallet', 'livefire-treasury', '--tx', solOver], { token: solToken, allowFail: true });
+if (!/policy denied/i.test(solDenyOut) || !solDenyOut.includes('per_transaction_ceiling')) {
+  die(`expected Solana POLICY_DENIED with the ceiling reason, got:\n${solDenyOut}`);
+}
+console.log(`    ✓ real Solana signing call denied: ${solDenyOut.trim().split('\n')[0]}`);
+
+say('SOLANA ALLOW side: agent signs 0.5 SOL within the mandate');
+const solAllowOut = ows(['sign', 'tx', '--chain', 'solana', '--wallet', 'livefire-treasury', '--tx', solUnder], { token: solToken });
+if (!/[0-9a-f]{80,}/m.test(solAllowOut.trim())) die(`expected Solana signature bytes, got:\n${solAllowOut}`);
+console.log(`    ✓ Solana signature returned (${solAllowOut.trim().length} chars)`);
+
 say('owner tier sanity: non-token auth bypasses policies (OWS two-tier design)');
 const ownerOut = ows(['sign', 'tx', '--chain', 'eip155:1', '--wallet', 'livefire-treasury', '--tx', overTx]);
 if (!/^[0-9a-f]{120,}/m.test(ownerOut.trim())) die(`owner-tier signing failed:\n${ownerOut}`);
@@ -119,8 +147,11 @@ say('decision log: verify both verdicts were recorded');
 const audit = readFileSync(config.auditLog, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
 const denies = audit.filter((e) => e.decision === 'deny' && e.reason.includes('per_transaction_ceiling'));
 const allows = audit.filter((e) => e.decision === 'allow');
-if (denies.length === 0 || allows.length === 0) die('audit log missing the live-fire decisions');
-console.log(`    ✓ JSONL log has the deny and the allow (${audit.length} entries total)`);
+const evmDecisions = audit.filter((e) => e.chain_id?.startsWith('eip155:'));
+const solDecisions = audit.filter((e) => e.chain_id?.startsWith('solana:'));
+if (denies.length < 2 || allows.length < 2) die('audit log missing the EVM and Solana live-fire decisions');
+if (evmDecisions.length === 0 || solDecisions.length === 0) die('audit log missing one of the two rails');
+console.log(`    ✓ JSONL log: ${evmDecisions.length} EVM + ${solDecisions.length} Solana decisions (${audit.length} total)`);
 
 if (!keep) rmSync(TMP, { recursive: true, force: true });
-console.log(`\n✓ LIVE-FIRE PASSED against ${version} — deny and allow both proven through real signing calls.`);
+console.log(`\n✓ LIVE-FIRE PASSED against ${version} — EVM and Solana, deny and allow, all proven through real signing calls.`);
