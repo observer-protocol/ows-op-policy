@@ -82,6 +82,17 @@ decision trail.
 
 ## Open items
 
+- **Plain SPL `Transfer` handling — design call flagged for Boyd.** The task
+  suggested "resolve via the mandate's declared unit — never guess." I chose
+  **fail-closed** instead: a plain `Transfer` carries no mint, so the asset
+  cannot be *identified* (only the amount and a destination token account are
+  in the instruction). Interpreting the amount with the mandate's declared
+  decimals would let an agent move an *unknown* token up to a USDC ceiling —
+  exactly the wrongful-accept an identity gate must avoid. `TransferChecked`
+  (mint-bearing) is the enforceable path and is fully supported. If you want
+  the interpret-via-declared-unit behavior for plain `Transfer` despite the
+  asset-identity gap, that's a one-line change in `resolve-transfer.ts` — say
+  the word.
 - **Solana network binding.** A Solana message carries a `recentBlockhash`,
   not the genesis hash, so mainnet-vs-devnet cannot be proven from the static
   payload (EVM embeds `chainId`; Solana does not). The cluster is trusted from
