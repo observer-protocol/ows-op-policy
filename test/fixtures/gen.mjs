@@ -8,7 +8,11 @@
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { newIssuerKeys, signEddsaJcs2022, makeDidDocument, makeStatusList, buildEip1559Tx } from './lib.mjs';
+import {
+  newIssuerKeys, signEddsaJcs2022, makeDidDocument, makeStatusList, buildEip1559Tx,
+  base58Encode as b58e, buildSolanaTx, ixSystemTransfer, ixSplTransferChecked, ixSplTransfer,
+  ixComputeBudget, ixOpaque, solPubkey, USDC_MINT,
+} from './lib.mjs';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
 rmSync(OUT, { recursive: true, force: true });
@@ -190,6 +194,37 @@ const credentials = {
   ),
 };
 
+// --- Solana credentials (mandates scoped to the Solana rail) -----------------
+const SOL_AGENT = solPubkey(1); // signer / transfer source
+const SOL_MERCHANT = solPubkey(2); // SOL recipient wallet
+const SOL_OTHER = solPubkey(3);
+const SOL_USDC_TA = solPubkey(4); // a USDC token account (destination)
+const SOL_MERCHANT_B58 = b58e(SOL_MERCHANT);
+const SOL_USDC_TA_B58 = b58e(SOL_USDC_TA);
+
+const solSubject = (over) => ({
+  authorizationLevel: undefined,
+  authorizationConfig: undefined,
+  tradingMandate: undefined,
+  ...over,
+});
+credentials['sol-native'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'], per_transaction_ceiling: { amount: '1.0', currency: 'SOL' } } }) }));
+credentials['sol-usdc'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'], per_transaction_ceiling: { amount: '100', currency: 'USDC' } } }) }));
+credentials['sol-cp-wallet'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'] }, tradingMandate: { counterparty: { allowList: [SOL_MERCHANT_B58] } } }) }));
+credentials['sol-cp-token'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'] }, tradingMandate: { counterparty: { allowList: [SOL_USDC_TA_B58] } } }) }));
+credentials['sol-identity'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'] } }) }));
+
+for (const [name, cred] of Object.entries(credentials)) {
+  if (name.startsWith('sol-')) writeFileSync(join(OUT, `cred-${name}.json`), JSON.stringify(cred, null, 2));
+}
+
+// Solana tx builders bound to the fixture accounts
+const SOL_CHAIN = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+const txSolTransfer = (lamports, to = SOL_MERCHANT, version = 'legacy', extra = []) =>
+  buildSolanaTx({ version, signer: SOL_AGENT, instructions: [ixSystemTransfer(SOL_AGENT, to, lamports), ...extra] });
+const txUsdcChecked = (amount, dest = SOL_USDC_TA, decimals = 6) =>
+  buildSolanaTx({ version: 'legacy', signer: SOL_AGENT, instructions: [ixSplTransferChecked(solPubkey(8), USDC_MINT, dest, SOL_AGENT, amount, decimals)] });
+
 // Tampered: valid signature, then mutate a binding field post-signing.
 const tampered = JSON.parse(JSON.stringify(credentials['valid-policy']));
 tampered.credentialSubject.actionScope.per_transaction_ceiling.amount = '1000.0';
@@ -302,6 +337,34 @@ const cases = [
   { name: 'deny: raw_hex chain id mismatch', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ chainId: 8453n, to: MERCHANT_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'chain-mismatch' },
   { name: 'deny: raw_hex undecodable', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: '0xdeadbeef' } }), expectAllow: false, reasonIncludes: 'evm-parse' },
   { name: 'deny: contract creation under counterparty binding', ctx: withCred('counterparty-allowlist', {}, { transaction: { raw_hex: buildEip1559Tx({ to: undefined, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'no resolvable recipient' },
+
+  // -------- Solana rail: full transaction-plane enforcement --------
+  // SOL native amount
+  { name: 'allow: SOL transfer under ceiling (legacy)', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(500000000) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: SOL transfer over ceiling', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(2000000000) } }), expectAllow: false, reasonIncludes: 'per_transaction_ceiling' },
+  { name: 'allow: SOL transfer under ceiling (v0 versioned)', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(500000000, SOL_MERCHANT, 'v0') } }), expectAllow: true, reasonIncludes: 'verified' },
+  // USDC SPL TransferChecked
+  { name: 'allow: USDC under ceiling (TransferChecked)', ctx: withCred('sol-usdc', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(50000000) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: USDC over ceiling', ctx: withCred('sol-usdc', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(150000000) } }), expectAllow: false, reasonIncludes: 'per_transaction_ceiling' },
+  { name: 'deny: USDC TransferChecked decimals disagree with registry', ctx: withCred('sol-usdc', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(50000000, SOL_USDC_TA, 9) } }), expectAllow: false, reasonIncludes: 'decimals' },
+  // same-currency invariant
+  { name: 'deny: USDC transfer under a SOL-denominated ceiling (no FX)', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(50000000) } }), expectAllow: false, reasonIncludes: 'same-currency' },
+  // plain SPL Transfer — asset not provable offline
+  { name: 'deny: plain SPL Transfer under token ceiling (asset unprovable)', ctx: withCred('sol-usdc', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: buildSolanaTx({ version: 'legacy', signer: SOL_AGENT, instructions: [ixSplTransfer(solPubkey(8), SOL_USDC_TA, SOL_AGENT, 50000000)] }) } }), expectAllow: false, reasonIncludes: 'does not carry the mint' },
+  // counterparty — SOL wallet
+  { name: 'allow: SOL transfer to allowlisted wallet', ctx: withCred('sol-cp-wallet', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(100, SOL_MERCHANT) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: SOL transfer to non-allowlisted wallet', ctx: withCred('sol-cp-wallet', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(100, SOL_OTHER) } }), expectAllow: false, reasonIncludes: 'allowList' },
+  // counterparty — SPL token account
+  { name: 'allow: USDC to allowlisted token account', ctx: withCred('sol-cp-token', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(100, SOL_USDC_TA) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: USDC to non-allowlisted token account', ctx: withCred('sol-cp-token', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txUsdcChecked(100, solPubkey(9)) } }), expectAllow: false, reasonIncludes: 'allowList' },
+  // multi-instruction + benign + opaque + multi-transfer
+  { name: 'allow: SOL transfer + ComputeBudget (benign) under ceiling', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(500000000, SOL_MERCHANT, 'legacy', [ixComputeBudget()]) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: SOL transfer + opaque instruction', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(500000000, SOL_MERCHANT, 'legacy', [ixOpaque()]) } }), expectAllow: false, reasonIncludes: 'opaque' },
+  { name: 'deny: two SOL transfers (multi-transfer attribution)', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(100000000, SOL_MERCHANT, 'legacy', [ixSystemTransfer(SOL_AGENT, SOL_OTHER, 100000000)]) } }), expectAllow: false, reasonIncludes: 'multi-transfer' },
+  // v0 ALUT — destination loaded from a lookup table, not in the static message
+  { name: 'deny: v0 tx with ALUT-referenced transfer account', ctx: withCred('sol-native', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: buildSolanaTx({ version: 'v0', signer: SOL_AGENT, alutAccounts: [solPubkey(30)], instructions: [{ programId: Buffer.alloc(32), accounts: [SOL_AGENT, { alut: true, key: solPubkey(30) }], data: (() => { const b = Buffer.alloc(12); b.writeUInt32LE(2, 0); b.writeBigUInt64LE(100n, 4); return b; })() }] }) } }), expectAllow: false, reasonIncludes: 'address-lookup-table' },
+  // identity-only mandate: opaque instruction is fine (no binding amount/cp)
+  { name: 'allow: identity-only Solana mandate tolerates opaque instruction', ctx: withCred('sol-identity', {}, { chain_id: SOL_CHAIN, transaction: { raw_hex: txSolTransfer(500000000, SOL_MERCHANT, 'legacy', [ixOpaque()]) } }), expectAllow: true, reasonIncludes: 'verified' },
 
   // -------- fail side: configuration --------
   { name: 'deny: missing policy_config', ctx: { ...baseCtx, policy_config: undefined }, expectAllow: false, reasonIncludes: 'policy_config missing' },

@@ -126,3 +126,102 @@ export function buildEip1559Tx({ chainId = 1n, to, valueWei, data = Buffer.alloc
   ]);
   return '0x02' + body.toString('hex');
 }
+
+// --- Solana transaction builders (legacy + v0), zero-dep, for fixtures ------
+const B58A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+export function base58Decode(s) {
+  let n = 0n;
+  for (const c of s) { const i = B58A.indexOf(c); if (i < 0) throw new Error('bad b58'); n = n * 58n + BigInt(i); }
+  const bytes = [];
+  while (n > 0n) { bytes.push(Number(n & 0xffn)); n >>= 8n; }
+  bytes.reverse();
+  let pad = 0; for (const c of s) { if (c === '1') pad++; else break; }
+  return Buffer.concat([Buffer.alloc(pad), Buffer.from(bytes)]);
+}
+function shortvec(n) {
+  const out = [];
+  for (;;) { let b = n & 0x7f; n >>>= 7; if (n) { out.push(b | 0x80); } else { out.push(b); break; } }
+  return Buffer.from(out);
+}
+// Known program pubkeys (32 bytes)
+export const SOL_SYSTEM = Buffer.alloc(32);
+export const SOL_TOKEN = base58Decode('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+export const SOL_COMPUTE_BUDGET = base58Decode('ComputeBudget111111111111111111111111111111');
+export const USDC_MINT = base58Decode('EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v');
+
+function pad32(seedByte) { return Buffer.alloc(32, seedByte); }
+
+// Build a Solana tx. opts.version: 'legacy'|'v0'. instructions: array of
+// {programId: Buffer(32), accounts: [Buffer(32)|{alut:true}], data: Buffer}.
+// Accounts are deduped into the static account list (signer first). An
+// {alut:true} account is placed in the ALUT-loaded range (v0 only) so its
+// instruction index points past staticCount.
+export function buildSolanaTx({ version = 'legacy', signer, instructions, alutAccounts = [] }) {
+  // assemble static account keys: signer, then all program ids + non-alut accounts (deduped)
+  const staticKeys = [];
+  const keyHex = new Map();
+  const addStatic = (buf) => {
+    const h = buf.toString('hex');
+    if (!keyHex.has(h)) { keyHex.set(h, staticKeys.length); staticKeys.push(buf); }
+    return keyHex.get(h);
+  };
+  addStatic(signer);
+  // ALUT accounts occupy indices AFTER all static keys; assign them now (v0)
+  const alutIndex = new Map();
+  // First pass: register all static (non-alut) accounts + program ids
+  for (const ix of instructions) {
+    for (const a of ix.accounts) if (!a.alut) addStatic(a);
+    addStatic(ix.programId);
+  }
+  const staticCount = staticKeys.length;
+  alutAccounts.forEach((a, i) => alutIndex.set(a.toString('hex'), staticCount + i));
+
+  const idxOf = (a) => {
+    if (a.alut) { const h = a.key.toString('hex'); if (!alutIndex.has(h)) throw new Error('alut acct not registered'); return alutIndex.get(h); }
+    return keyHex.get(a.toString('hex'));
+  };
+
+  const ixBufs = instructions.map((ix) => {
+    const prog = keyHex.get(ix.programId.toString('hex'));
+    const accIdx = ix.accounts.map(idxOf);
+    return Buffer.concat([Buffer.from([prog]), shortvec(accIdx.length), Buffer.from(accIdx), shortvec(ix.data.length), ix.data]);
+  });
+
+  const header = Buffer.from([1, 0, staticKeys.length - 1 - /*writable signer*/0 >= 0 ? 1 : 0]); // numReq=1; readonly-unsigned≈1 (program). simplistic; parser ignores values.
+  const acctsBuf = Buffer.concat([shortvec(staticKeys.length), ...staticKeys]);
+  const blockhash = pad32(9);
+  const ixSection = Buffer.concat([shortvec(instructions.length), ...ixBufs]);
+
+  let message;
+  if (version === 'v0') {
+    // v0 ALUT lookups: one table, writable indexes = alutAccounts positions (dummy)
+    const lookups = alutAccounts.length > 0
+      ? Buffer.concat([shortvec(1), pad32(7), shortvec(alutAccounts.length), Buffer.from(alutAccounts.map((_, i) => i)), shortvec(0)])
+      : shortvec(0);
+    message = Buffer.concat([Buffer.from([0x80]), header, acctsBuf, blockhash, ixSection, lookups]);
+  } else {
+    message = Buffer.concat([header, acctsBuf, blockhash, ixSection]);
+  }
+  const tx = Buffer.concat([shortvec(1), Buffer.alloc(64), message]);
+  return '0x' + tx.toString('hex');
+}
+
+export function ixSystemTransfer(from, to, lamports) {
+  const data = Buffer.concat([Buffer.from([2, 0, 0, 0]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(lamports)); return b; })()]);
+  return { programId: SOL_SYSTEM, accounts: [from, to], data };
+}
+export function ixSplTransferChecked(source, mint, dest, owner, amount, decimals) {
+  const b = Buffer.alloc(10); b[0] = 12; b.writeBigUInt64LE(BigInt(amount), 1); b[9] = decimals;
+  return { programId: SOL_TOKEN, accounts: [source, mint, dest, owner], data: b };
+}
+export function ixSplTransfer(source, dest, owner, amount) {
+  const b = Buffer.alloc(9); b[0] = 3; b.writeBigUInt64LE(BigInt(amount), 1);
+  return { programId: SOL_TOKEN, accounts: [source, dest, owner], data: b };
+}
+export function ixComputeBudget() {
+  return { programId: SOL_COMPUTE_BUDGET, accounts: [], data: Buffer.from([2, 0x40, 0x42, 0x0f, 0x00]) }; // setComputeUnitLimit
+}
+export function ixOpaque() {
+  return { programId: pad32(0x55), accounts: [], data: Buffer.from([1, 2, 3]) }; // unknown program
+}
+export const solPubkey = (seed) => pad32(seed);

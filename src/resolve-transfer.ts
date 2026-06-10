@@ -88,13 +88,31 @@ function resolveSolana(ctx: PolicyContext, railDef: RailDef, config: VerifierCon
   }
 
   const valueTransfers = parsed.transfers;
-  if (valueTransfers.length === 0) {
-    // No recognised value movement. Native/identity-only mandates are fine;
-    // a binding amount/counterparty constraint has nothing to bind to.
+  const note = `Solana ${parsed.version} tx: ${parsed.instructionCount} instruction(s) — ${valueTransfers.length} transfer, ${parsed.benignCount} benign, ${parsed.unknownCount} opaque, ${parsed.alutUnresolved} ALUT-unresolved`;
+
+  // Fail-closed boundaries (each denies only a BINDING amount/counterparty
+  // constraint; identity/temporal/revocation-scoped mandates still pass).
+  if (parsed.alutUnresolved > 0) {
     return {
       kind: 'unparsed',
       recipientKind: 'none',
-      notes: [`Solana tx carries ${parsed.instructionCount} instruction(s), none a recognised transfer`],
+      notes: [note],
+      unenforceable: `Solana v0 transaction references ${parsed.alutUnresolved} address-lookup-table account(s) not present in the static message — cannot prove amount/counterparty without on-chain table reads (not done in v1)`,
+    };
+  }
+  if (parsed.unknownCount > 0) {
+    return {
+      kind: 'unparsed',
+      recipientKind: 'none',
+      notes: [note],
+      unenforceable: `Solana tx contains ${parsed.unknownCount} opaque/unhandled instruction(s) that may move value — every instruction must satisfy the mandate, so this fails closed`,
+    };
+  }
+  if (valueTransfers.length === 0) {
+    return {
+      kind: 'unparsed',
+      recipientKind: 'none',
+      notes: [note],
       unenforceable: 'no recognised SOL/SPL transfer instruction to enforce amount/counterparty against',
     };
   }
@@ -102,7 +120,7 @@ function resolveSolana(ctx: PolicyContext, railDef: RailDef, config: VerifierCon
     return {
       kind: 'unparsed',
       recipientKind: 'none',
-      notes: [],
+      notes: [note],
       unenforceable: `Solana tx contains ${valueTransfers.length} transfer instructions — multi-transfer attribution is not supported; fails closed`,
     };
   }

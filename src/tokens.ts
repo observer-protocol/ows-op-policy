@@ -37,3 +37,14 @@ export const SOLANA_PROGRAMS = {
   TOKEN: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
   TOKEN_2022: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
 } as const;
+
+// Programs that cannot move an agent's tokens or change a counterparty, so
+// their presence alongside a transfer does not defeat enforcement. Compute
+// budget sets fee/CU only; Memo carries opaque note bytes but moves nothing.
+// Everything NOT in this set, and not a recognised transfer, is treated as
+// opaque → fail closed under any binding amount/counterparty constraint.
+export const SOLANA_BENIGN_PROGRAMS = new Set<string>([
+  'ComputeBudget111111111111111111111111111111',
+  'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr', // SPL Memo v2
+  'Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo', // SPL Memo v1
+]);
