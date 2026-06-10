@@ -12,6 +12,7 @@ import {
   newIssuerKeys, signEddsaJcs2022, makeDidDocument, makeStatusList, buildEip1559Tx,
   base58Encode as b58e, buildSolanaTx, ixSystemTransfer, ixSplTransferChecked, ixSplTransfer,
   ixComputeBudget, ixOpaque, solPubkey, USDC_MINT,
+  erc20TransferData, eip3009TransferWithAuthData, USDC_EVM_ETHEREUM,
 } from './lib.mjs';
 
 const OUT = join(dirname(fileURLToPath(import.meta.url)), 'out');
@@ -214,9 +215,17 @@ credentials['sol-cp-wallet'] = sign(baseCredential({ subject: solSubject({ actio
 credentials['sol-cp-token'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'] }, tradingMandate: { counterparty: { allowList: [SOL_USDC_TA_B58] } } }) }));
 credentials['sol-identity'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['solana-mainnet'] } }) }));
 
+// EVM USDC (ERC-20 / EIP-3009) credential: ceiling 100 USDC on ethereum-mainnet
+credentials['evm-usdc'] = sign(baseCredential({ subject: solSubject({ actionScope: { allowed_rails: ['ethereum-mainnet'], per_transaction_ceiling: { amount: '100', currency: 'USDC' } } }) }));
+
 for (const [name, cred] of Object.entries(credentials)) {
-  if (name.startsWith('sol-')) writeFileSync(join(OUT, `cred-${name}.json`), JSON.stringify(cred, null, 2));
+  if (name.startsWith('sol-') || name === 'evm-usdc') writeFileSync(join(OUT, `cred-${name}.json`), JSON.stringify(cred, null, 2));
 }
+// EVM USDC token-transfer tx builders (to = USDC contract; recipient/amount in calldata)
+const txErc20Usdc = (amount, to = MERCHANT_ADDR) =>
+  buildEip1559Tx({ to: USDC_EVM_ETHEREUM, valueWei: 0n, data: erc20TransferData(to, amount) });
+const txEip3009Usdc = (amount, to = MERCHANT_ADDR) =>
+  buildEip1559Tx({ to: USDC_EVM_ETHEREUM, valueWei: 0n, data: eip3009TransferWithAuthData(MERCHANT_ADDR, to, amount) });
 
 // Solana tx builders bound to the fixture accounts
 const SOL_CHAIN = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
@@ -337,6 +346,12 @@ const cases = [
   { name: 'deny: raw_hex chain id mismatch', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: buildEip1559Tx({ chainId: 8453n, to: MERCHANT_ADDR, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'chain-mismatch' },
   { name: 'deny: raw_hex undecodable', ctx: withCred('valid-policy', {}, { transaction: { raw_hex: '0xdeadbeef' } }), expectAllow: false, reasonIncludes: 'evm-parse' },
   { name: 'deny: contract creation under counterparty binding', ctx: withCred('counterparty-allowlist', {}, { transaction: { raw_hex: buildEip1559Tx({ to: undefined, valueWei: 100n }) } }), expectAllow: false, reasonIncludes: 'no resolvable recipient' },
+
+  // -------- EVM token rail: ERC-20 + EIP-3009 USDC (6-decimal) enforcement --------
+  { name: 'allow: ERC-20 USDC under ceiling (decoded from calldata, 6dec)', ctx: withCred('evm-usdc', {}, { transaction: { raw_hex: txErc20Usdc(50000000n) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: ERC-20 USDC over ceiling', ctx: withCred('evm-usdc', {}, { transaction: { raw_hex: txErc20Usdc(150000000n) } }), expectAllow: false, reasonIncludes: 'per_transaction_ceiling' },
+  { name: 'allow: EIP-3009 transferWithAuthorization USDC under ceiling (x402 path)', ctx: withCred('evm-usdc', {}, { transaction: { raw_hex: txEip3009Usdc(50000000n) } }), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'deny: EIP-3009 USDC over ceiling', ctx: withCred('evm-usdc', {}, { transaction: { raw_hex: txEip3009Usdc(150000000n) } }), expectAllow: false, reasonIncludes: 'per_transaction_ceiling' },
 
   // -------- Solana rail: full transaction-plane enforcement --------
   // SOL native amount

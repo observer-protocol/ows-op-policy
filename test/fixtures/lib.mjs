@@ -101,8 +101,21 @@ export function makeStatusList({ issuer, privateKey, verificationMethod, setBits
 function rlpBytes(b) {
   if (b.length === 1 && b[0] < 0x80) return b;
   if (b.length < 56) return Buffer.concat([Buffer.from([0x80 + b.length]), b]);
-  throw new Error('fixture rlp: long strings unsupported');
+  let lenHex = b.length.toString(16);
+  if (lenHex.length % 2) lenHex = '0' + lenHex;
+  const lb = Buffer.from(lenHex, 'hex');
+  return Buffer.concat([Buffer.from([0xb7 + lb.length]), lb, b]);
 }
+function pad32hex(hexNoPrefix) { return Buffer.from(hexNoPrefix.padStart(64, '0'), 'hex'); }
+export function erc20TransferData(toAddr, amount) {
+  return Buffer.concat([Buffer.from('a9059cbb', 'hex'), pad32hex(toAddr.replace(/^0x/, '')), pad32hex(BigInt(amount).toString(16))]);
+}
+export function eip3009TransferWithAuthData(fromAddr, toAddr, value) {
+  return Buffer.concat([Buffer.from('e3ee160e', 'hex'),
+    pad32hex(fromAddr.replace(/^0x/, '')), pad32hex(toAddr.replace(/^0x/, '')), pad32hex(BigInt(value).toString(16)),
+    pad32hex('0'), pad32hex('0'), pad32hex('0')]);
+}
+export const USDC_EVM_ETHEREUM = '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48';
 function rlpInt(n) {
   if (n === 0n) return rlpBytes(Buffer.alloc(0));
   let hex = n.toString(16);
