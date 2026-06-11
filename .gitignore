@@ -3,3 +3,4 @@ dist/
 test/fixtures/out/
 harness/.tmp/
 *.log
+.demo-sandbox/
