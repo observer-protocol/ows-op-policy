@@ -2,8 +2,12 @@
 
 **Observer Protocol delegation verification for Open Wallet Standard wallets.**
 
-> **Status: pre-release.** Built and conformance-tested against fixtures; not yet
-> published or validated against production Observer Protocol credentials.
+> **Published.** `@observer-protocol/ows-op-verify@0.1.0` on npm. The OWS member of
+> Observer Protocol's three sibling enforcement engines, alongside
+> [`wdk-op-policy`](https://github.com/observer-protocol/wdk-op-policy) (Tether WDK, PR #55)
+> and [`mppx-op-account`](https://github.com/observer-protocol/mppx-op-account) (MPP/Tempo
+> via mppx), all sharing a byte-identical verification core. *The binding layer is
+> contested; the enforcement locus is not.*
 
 A single-file policy executable for the [OWS policy engine](https://github.com/open-wallet-standard/core/blob/main/docs/03-policy-engine.md)
 that gates every agent signing request on a **signed, revocable, scope-limited
