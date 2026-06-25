@@ -1,21 +1,26 @@
 import { readFileSync } from 'node:fs';
-import { parseConfig } from './config.js';
-import { validateStructure, checkValidityWindow } from './schema.js';
-import { resolveDidDocument, findAssertionMethodKey } from './resolve.js';
-import { verifyEddsaJcs2022, decodeEd25519Multibase } from './proof.js';
-import { checkStatusEntry } from './revocation.js';
-import { evaluateMandate } from './mandate.js';
-import { resolveTransfer } from './resolve-transfer.js';
-import { parseEvmRawTx } from './evmtx.js';
-import { appendAudit } from './audit.js';
-import { sha256 } from './crypto.js';
+import {
+  parseConfig,
+  validateStructure,
+  checkValidityWindow,
+  resolveDidDocument,
+  findAssertionMethodKey,
+  verifyEddsaJcs2022,
+  decodeEd25519Multibase,
+  checkStatusEntry,
+  evaluateMandate,
+  appendAudit,
+  sha256,
+} from '@observer-protocol/policy-engine';
 import type {
   AuditEntry,
   ObserverDelegationCredential,
   PolicyContext,
   PolicyResult,
   VerifierConfig,
-} from './types.js';
+} from '@observer-protocol/policy-engine';
+import { resolveTransfer } from './resolve-transfer.js';
+import { parseEvmRawTx } from './evmtx.js';
 
 // ows-op-verify — Observer Protocol delegation-credential verifier for the
 // Open Wallet Standard policy engine.

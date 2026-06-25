@@ -42,6 +42,9 @@
     "delegation",
     "eddsa-jcs-2022"
   ],
+  "dependencies": {
+    "@observer-protocol/policy-engine": "file:../op-policy-engine/packages/policy-engine"
+  },
   "devDependencies": {
     "@types/node": "^25.9.2",
     "esbuild": "^0.21.0",
