@@ -26,6 +26,7 @@ const MERCHANT_ADDR = '0xA11CE00000000000000000000000000000000001';
 const OTHER_ADDR = '0xB0B0000000000000000000000000000000000002';
 const BLOCKED_ADDR = '0xBAD0000000000000000000000000000000000003';
 const SCHEMA_URL = 'https://observerprotocol.org/schemas/delegation/v2.1.json';
+const SCHEMA_URL_V24 = 'https://observerprotocol.org/schemas/delegation/v2.4.json';
 
 const key1 = newIssuerKeys(); // assertionMethod-valid
 const key2 = newIssuerKeys(); // present but NOT in assertionMethod
@@ -102,6 +103,8 @@ const sign = (cred, key = key1.privateKey, vm = VM1) => signEddsaJcs2022(cred, k
 
 const credentials = {
   'valid-policy': sign(baseCredential()),
+  // v2.4: same valid mandate declaring the current Sovereign delegation schema.
+  'valid-policy-v24': sign(baseCredential({ top: { credentialSchema: { id: SCHEMA_URL_V24, type: 'JsonSchema' } } })),
   expired: sign(baseCredential({ top: { validUntil: '2026-02-01T00:00:00Z' } })),
   'not-yet-valid': sign(baseCredential({ top: { validFrom: '2026-12-01T00:00:00Z' } })),
   'bad-schema': sign(
@@ -267,7 +270,7 @@ for (const [name, cred] of Object.entries(credentials)) {
 const baseConfig = {
   credentialPath: join(OUT, 'cred-valid-policy.json'),
   issuerDid: ISSUER,
-  schemaAllowlist: [SCHEMA_URL],
+  schemaAllowlist: [SCHEMA_URL, SCHEMA_URL_V24],
   agentDid: AGENT,
   revocation: { maxStalenessHours: 24, onUnreachable: 'cache-then-deny', fetchTimeoutMs: 1500 },
   didCache: { maxStalenessHours: 24 },
@@ -300,6 +303,7 @@ const withCred = (name, configOverrides = {}, ctxOverrides = {}) =>
 const cases = [
   // -------- pass side --------
   { name: 'allow: valid credential, in-scope transaction', ctx: withCred('valid-policy'), expectAllow: true, reasonIncludes: 'verified' },
+  { name: 'allow: v2.4 credentialSchema accepted', ctx: withCred('valid-policy-v24'), expectAllow: true, reasonIncludes: 'verified' },
   { name: 'allow: counterparty allowList match via DID map', ctx: withCred('counterparty-allowlist'), expectAllow: true, reasonIncludes: 'verified' },
   { name: 'allow: counterparty allowList match via raw address', ctx: withCred('counterparty-allowlist', {}, { transaction: { ...baseCtx.transaction, to: OTHER_ADDR } }), expectAllow: true, reasonIncludes: 'verified' },
   { name: 'allow: inside temporal window', ctx: withCred('temporal'), expectAllow: true, reasonIncludes: 'verified' },

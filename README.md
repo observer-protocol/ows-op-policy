@@ -167,7 +167,7 @@ behavioral value out loud; the table is the contract.
 |---|---|---|
 | `credentialPath` | ✅ | Delegation credential JSON. **Re-read on every call** — rotation/re-issue takes effect immediately |
 | `issuerDid` | ✅ | Pinned trusted issuer. Credentials from any other issuer deny |
-| `schemaAllowlist` | ✅ | Accepted `credentialSchema.id` URLs (frozen-URL schema policy; default v2.1 only) |
+| `schemaAllowlist` | ✅ | Accepted `credentialSchema.id` URLs (frozen-URL schema policy; example accepts v2.1 + v2.4 — the current Sovereign-issued delegation schema) |
 | `agentDid` | — | Pin `credentialSubject.id`; mismatch denies |
 | `revocation.maxStalenessHours` | written explicitly (24) | Cache window for status lists when refresh fails. Older ⇒ deny |
 | `revocation.onUnreachable` | written explicitly | `cache-then-deny` (the only implemented behavior, on purpose) |

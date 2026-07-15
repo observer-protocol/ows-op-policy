@@ -112,6 +112,7 @@ const netCred = signEddsaJcs2022(netCredUnsigned, nk.privateKey, NET_VM);
 writeFileSync(join(OUT, 'cred-net.json'), JSON.stringify(netCred));
 
 const SCHEMA_URL = 'https://observerprotocol.org/schemas/delegation/v2.1.json';
+const SCHEMA_URL_V24 = 'https://observerprotocol.org/schemas/delegation/v2.4.json';
 const netCtx = (overrides = {}) => ({
   chain_id: 'eip155:1',
   wallet_id: '00000000-0000-4000-8000-000000000001',
@@ -122,7 +123,7 @@ const netCtx = (overrides = {}) => ({
   policy_config: {
     credentialPath: join(OUT, 'cred-net.json'),
     issuerDid: NET_ISSUER,
-    schemaAllowlist: [SCHEMA_URL],
+    schemaAllowlist: [SCHEMA_URL, SCHEMA_URL_V24],
     revocation: { maxStalenessHours: 24, onUnreachable: 'cache-then-deny', fetchTimeoutMs: 1500 },
     didCache: { maxStalenessHours: 24 },
     cacheDir: netCache,

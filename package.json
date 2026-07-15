@@ -1,6 +1,6 @@
 {
   "name": "@observer-protocol/ows-op-verify",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Observer Protocol delegation-credential verifier for the Open Wallet Standard policy engine. Pre-signing enforcement of signed agent mandates as an OWS custom-executable policy.",
   "license": "MIT",
   "type": "module",
@@ -13,7 +13,8 @@
     "policy/op-delegation.template.json",
     "docs/SCOPE.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "esbuild src/main.ts --bundle --platform=node --target=node18 --format=cjs --banner:js='#!/usr/bin/env node' --outfile=dist/ows-op-verify.cjs && chmod +x dist/ows-op-verify.cjs",
@@ -42,13 +43,11 @@
     "delegation",
     "eddsa-jcs-2022"
   ],
-  "dependencies": {
-    "@observer-protocol/policy-engine": "file:../op-policy-engine/packages/policy-engine"
-  },
   "devDependencies": {
     "@types/node": "^25.9.2",
     "esbuild": "^0.21.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@observer-protocol/policy-engine": "^0.3.0"
   },
   "publishConfig": {
     "access": "public"
