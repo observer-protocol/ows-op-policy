@@ -75,10 +75,17 @@ declarative mirror rules (`allowed_chains` from the mandate's rails,
 ## What gets enforced (transaction plane)
 
 Binding mandate fields deny; advisory fields (per AIP v0.8: `cumulative_budget`,
-`allowed_counterparty_types`, `actionScope.geographic_restriction`) are surfaced
-in the decision log but never ground a deny. A **binding constraint the verifier
-cannot establish from the signing context is a deny** — wrongful acceptance is
-treated as categorically worse than wrongful rejection.
+`actionScope.geographic_restriction`) are surfaced in the decision log but never
+ground a deny. A **binding constraint the verifier cannot establish from the
+signing context is a deny** — wrongful acceptance is treated as categorically
+worse than wrongful rejection.
+
+`allowed_counterparty_types` is **not** advisory and this README previously said
+it was. It has no enforcement path in any Observer Protocol engine, so a mandate
+that sets it **denies**, tagged `[unenforceable]`. The property is accepted by
+delegation schemas v2.1/v2.3/v2.4 and was recommended by AIP v0.8 §1.3; both the
+recommendation and the property are withdrawn. A credential carrying it is
+refused in full, not served with the field ignored.
 
 - `actionScope.allowed_rails`, `per_transaction_ceiling` (same-currency only —
   **no FX conversion, ever**), `allowed_transaction_categories` (against the
