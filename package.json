@@ -1,6 +1,6 @@
 {
   "name": "@observer-protocol/ows-op-verify",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Observer Protocol delegation-credential verifier for the Open Wallet Standard policy engine. Pre-signing enforcement of signed agent mandates as an OWS custom-executable policy.",
   "license": "MIT",
   "type": "module",
@@ -47,7 +47,7 @@
     "@types/node": "^25.9.2",
     "esbuild": "^0.21.0",
     "typescript": "^5.4.0",
-    "@observer-protocol/policy-engine": "^0.3.0"
+    "@observer-protocol/policy-engine": ">=0.4.0 <1.0.0"
   },
   "publishConfig": {
     "access": "public"

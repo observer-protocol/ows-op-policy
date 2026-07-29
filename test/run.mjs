@@ -124,6 +124,11 @@ const netCtx = (overrides = {}) => ({
     credentialPath: join(OUT, 'cred-net.json'),
     issuerDid: NET_ISSUER,
     schemaAllowlist: [SCHEMA_URL, SCHEMA_URL_V24],
+    // The status list is served by this test's own loopback server, which is not
+    // the did:web issuer's origin. From policy-engine 0.4.0 a credential-supplied
+    // status-list URL is dereferenced only when it is origin-pinned to the issuer
+    // or explicitly listed here, and the list is empty by default.
+    statusListOriginAllowlist: [`http://127.0.0.1:${port}`],
     revocation: { maxStalenessHours: 24, onUnreachable: 'cache-then-deny', fetchTimeoutMs: 1500 },
     didCache: { maxStalenessHours: 24 },
     cacheDir: netCache,
