@@ -1,8 +1,35 @@
 # ows-op-policy
 
+> **SUPPORT TIER — REFERENCE IMPLEMENTATION, NO CONSUMER FOUND.** Not under active maintenance.
+> Read it, run it, copy from it; do not assume support.
+>
+> **What backs the tier, stated as an absence with its scope.** No import or require of
+> `@observer-protocol/ows-op-verify` was found anywhere in the Observer Protocol estate — not in any
+> service, and not even in our own conformance harness, which does exercise four of the other
+> adapters. It is not installed on the production host. **That search covered our own estate and
+> that host only. An external adopter running this against a real Open Wallet Standard Solana wallet
+> would be invisible to us, and this adapter is built for someone else's stack, so that is a live
+> possibility rather than a technicality.** This says we found no consumer; it does not say nobody
+> uses it.
+>
+> The rail registry in the Observer Protocol API names this package at `transports[7].enforcer`.
+> **That field is read only by the registry's own validator and its tests** — `api-server-v2.py`
+> consumes only `registerable_rail_ids()`, so the registry declares this adapter and never installs
+> or calls it. A registry entry is not a consumer.
+>
+> **Versions.** Published `@observer-protocol/ows-op-verify@0.3.0`.
+> The Observer Protocol API's `rails.registry.json` pins `0.2.0`, which is behind. **That pin is
+> not tracked to publication and must not be read as the current version.** Every rail in that
+> registry is currently behind its published package, some by two minors. Whether the registry
+> ought to track publication or deliberately lag is an open decision, recorded here rather than
+> quietly corrected.
+>
+> Tiers for all seven Observer Protocol adapters are listed together in
+> [`op-policy-engine`](https://github.com/observer-protocol/op-policy-engine#adapter-support-tiers).
+
 **Observer Protocol delegation verification for Open Wallet Standard wallets.**
 
-> **Published.** `@observer-protocol/ows-op-verify@0.1.0` on npm. The OWS member of
+> **Published.** `@observer-protocol/ows-op-verify@0.3.0` on npm. The OWS member of
 > Observer Protocol's three sibling enforcement engines, alongside
 > [`wdk-op-policy`](https://github.com/observer-protocol/wdk-op-policy) (Tether WDK, PR #55)
 > and [`mppx-op-account`](https://github.com/observer-protocol/mppx-op-account) (MPP/Tempo
